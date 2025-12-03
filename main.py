@@ -21,6 +21,7 @@ class FitnessApp:
         self.selected_days = []
         self.trainings = {}
         self.completed_trainings = set()  # Отслеживание выполненных тренировок
+        self.params_changed = False  # Флаг изменения параметров
         
         # Создаем главные фреймы
         self.create_widgets()
@@ -105,7 +106,12 @@ class FitnessApp:
         # Обработка прокрутки колесиком мыши
         canvas = event.widget
         if isinstance(canvas, tk.Canvas):
-            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            if event.delta:
+                canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            elif event.num == 4:  # Linux
+                canvas.yview_scroll(-1, "units")
+            elif event.num == 5:  # Linux
+                canvas.yview_scroll(1, "units")
         
     def setup_parameters(self):
         # Заголовок
@@ -134,10 +140,14 @@ class FitnessApp:
         ttk.Label(strength_frame, text="Подтягивания:").pack(anchor=tk.W)
         self.pullups_entry = ttk.Entry(strength_frame)
         self.pullups_entry.pack(fill=tk.X, pady=2)
+        # Привязываем событие изменения к обновлению расписания
+        self.pullups_entry.bind('<KeyRelease>', self.on_params_change)
         
         ttk.Label(strength_frame, text="Подъем переворотом:").pack(anchor=tk.W, pady=(10,0))
         self.chinups_entry = ttk.Entry(strength_frame)
         self.chinups_entry.pack(fill=tk.X, pady=2)
+        # Привязываем событие изменения к обновлению расписания
+        self.chinups_entry.bind('<KeyRelease>', self.on_params_change)
         
         # Выносливость
         endurance_frame = ttk.LabelFrame(params_frame, text="Выносливость", padding=10)
@@ -146,14 +156,20 @@ class FitnessApp:
         ttk.Label(endurance_frame, text="Бег на 5 километров (мин:сек):").pack(anchor=tk.W)
         self.run5k_entry = ttk.Entry(endurance_frame)
         self.run5k_entry.pack(fill=tk.X, pady=2)
+        # Привязываем событие изменения к обновлению расписания
+        self.run5k_entry.bind('<KeyRelease>', self.on_params_change)
         
         ttk.Label(endurance_frame, text="Бег на 3 километра (мин:сек):").pack(anchor=tk.W, pady=(10,0))
         self.run3k_entry = ttk.Entry(endurance_frame)
         self.run3k_entry.pack(fill=tk.X, pady=2)
+        # Привязываем событие изменения к обновлению расписания
+        self.run3k_entry.bind('<KeyRelease>', self.on_params_change)
         
         ttk.Label(endurance_frame, text="Марш-бросок на 5 километров (мин:сек):").pack(anchor=tk.W, pady=(10,0))
         self.march5k_entry = ttk.Entry(endurance_frame)
         self.march5k_entry.pack(fill=tk.X, pady=2)
+        # Привязываем событие изменения к обновлению расписания
+        self.march5k_entry.bind('<KeyRelease>', self.on_params_change)
         
         # Быстрота
         speed_frame = ttk.LabelFrame(params_frame, text="Быстрота", padding=10)
@@ -162,14 +178,20 @@ class FitnessApp:
         ttk.Label(speed_frame, text="Бег на 100 метров (сек):").pack(anchor=tk.W)
         self.run100m_entry = ttk.Entry(speed_frame)
         self.run100m_entry.pack(fill=tk.X, pady=2)
+        # Привязываем событие изменения к обновлению расписания
+        self.run100m_entry.bind('<KeyRelease>', self.on_params_change)
         
         ttk.Label(speed_frame, text="Челночный бег 10 х 10 метров (сек):").pack(anchor=tk.W, pady=(10,0))
         self.shuttle10x10_entry = ttk.Entry(speed_frame)
         self.shuttle10x10_entry.pack(fill=tk.X, pady=2)
+        # Привязываем событие изменения к обновлению расписания
+        self.shuttle10x10_entry.bind('<KeyRelease>', self.on_params_change)
         
         ttk.Label(speed_frame, text="Бег на 60 метров (сек):").pack(anchor=tk.W, pady=(10,0))
         self.run60m_entry = ttk.Entry(speed_frame)
         self.run60m_entry.pack(fill=tk.X, pady=2)
+        # Привязываем событие изменения к обновлению расписания
+        self.run60m_entry.bind('<KeyRelease>', self.on_params_change)
         
     def setup_calendar(self):
         # Календарь
@@ -191,6 +213,16 @@ class FitnessApp:
         # Привязываем событие выбора даты
         self.cal.bind("<<CalendarSelected>>", self.on_date_select)
         
+    def on_params_change(self, event=None):
+        """Обновление расписания при изменении параметров"""
+        # Помечаем, что параметры изменились и нужно обновить тренировки при следующей генерации
+        self.params_changed = True
+        
+        # Обновляем расписание, если уже были выбраны дни
+        if self.selected_days and self.trainings:
+            # Перегенерируем тренировки на основе новых параметров
+            self.generate_trainings()
+    
     def setup_schedule_tab(self):
         # Заголовок вкладки тренировок
         title_label = ttk.Label(self.schedule_scrollable_frame, text="Предстоящие тренировки", font=("Arial", 14, "bold"))
@@ -288,15 +320,37 @@ class FitnessApp:
         details_window.title(f"Детали тренировки - {day}")
         details_window.geometry("600x700")
         
+        # Создаем фрейм с прокруткой
+        canvas = tk.Canvas(details_window)
+        scrollbar = ttk.Scrollbar(details_window, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Привязываем колесико мыши к прокрутке
+        canvas.bind("<MouseWheel>", self._on_mousewheel_popup)
+        # Для Linux
+        canvas.bind("<Button-4>", self._on_mousewheel_popup)
+        canvas.bind("<Button-5>", self._on_mousewheel_popup)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
         # Заголовок
-        title_label = ttk.Label(details_window, text=f"{self.trainings[day]['name']}", font=("Arial", 14, "bold"))
+        title_label = ttk.Label(scrollable_frame, text=f"{self.trainings[day]['name']}", font=("Arial", 14, "bold"))
         title_label.pack(pady=20)
         
         # Информация о тренировке
         training_info = self.trainings[day]
         
         # Основная информация
-        info_frame = ttk.Frame(details_window)
+        info_frame = ttk.Frame(scrollable_frame)
         info_frame.pack(fill=tk.X, padx=20, pady=10)
         
         ttk.Label(info_frame, text=f"Тип: {', '.join(training_info['type'])}", font=("Arial", 10)).pack(anchor=tk.W)
@@ -304,7 +358,7 @@ class FitnessApp:
         ttk.Label(info_frame, text=f"Длительность: {training_info['duration_min']} мин", font=("Arial", 10)).pack(anchor=tk.W)
         
         # Разминка
-        warmup_frame = ttk.LabelFrame(details_window, text="Разминка", padding=10)
+        warmup_frame = ttk.LabelFrame(scrollable_frame, text="Разминка", padding=10)
         warmup_frame.pack(fill=tk.X, padx=20, pady=10)
         
         warmup_text = tk.Text(warmup_frame, wrap=tk.WORD, height=4, padx=10, pady=10)
@@ -313,7 +367,7 @@ class FitnessApp:
         warmup_text.pack(fill=tk.X)
         
         # Основная часть
-        main_frame = ttk.LabelFrame(details_window, text="Основная часть", padding=10)
+        main_frame = ttk.LabelFrame(scrollable_frame, text="Основная часть", padding=10)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
         main_text = tk.Text(main_frame, wrap=tk.WORD, padx=10, pady=10)
@@ -336,7 +390,7 @@ class FitnessApp:
         main_text.pack(fill=tk.BOTH, expand=True)
         
         # Заминка
-        cooldown_frame = ttk.LabelFrame(details_window, text="Заминка", padding=10)
+        cooldown_frame = ttk.LabelFrame(scrollable_frame, text="Заминка", padding=10)
         cooldown_frame.pack(fill=tk.X, padx=20, pady=10)
         
         cooldown_text = tk.Text(cooldown_frame, wrap=tk.WORD, height=4, padx=10, pady=10)
@@ -345,9 +399,24 @@ class FitnessApp:
         cooldown_text.pack(fill=tk.X)
         
         # Кнопка "Выполнено"
-        complete_button = ttk.Button(details_window, text="Выполнено", 
+        complete_button = ttk.Button(scrollable_frame, text="Выполнено", 
                                    command=lambda: self.mark_training_completed(day, details_window))
         complete_button.pack(pady=20)
+        
+        # Также привязываем колесико мыши к основному фрейму для прокрутки
+        scrollable_frame.bind("<MouseWheel>", self._on_mousewheel_popup)
+        scrollable_frame.bind("<Button-4>", self._on_mousewheel_popup)
+        scrollable_frame.bind("<Button-5>", self._on_mousewheel_popup)
+    
+    def _on_mousewheel_popup(self, event):
+        # Обработка прокрутки колесиком мыши в popup окне
+        if event.delta:
+            self.focus_set()  # Устанавливаем фокус на окно
+            event.widget.master.yview_scroll(int(-1*(event.delta/120)), "units")
+        elif event.num == 4:  # Linux
+            event.widget.master.yview_scroll(-1, "units")
+        elif event.num == 5:  # Linux
+            event.widget.master.yview_scroll(1, "units")
         
     def mark_training_completed(self, day, window):
         # Отмечаем тренировку как выполненную
@@ -399,6 +468,9 @@ class FitnessApp:
         # Генерация тренировок для каждого дня
         self.trainings = self.create_training_schedule(user_data['selected_days'], priorities)
         
+        # Сбрасываем флаг изменений параметров
+        self.params_changed = False
+        
         # Обновление вкладки тренировок
         self.refresh_schedule()
         
@@ -430,33 +502,74 @@ class FitnessApp:
         # Оценка уровня силы на основе результатов
         levels = []
         
-        # Подтягивания - нормативы для 3 курса (пример)
+        # Получаем номер курса
+        course = int(self.course_var.get())
+        
+        # Подтягивания - точные нормативы
         pullups = strength_data['pullups']
         if pullups.isdigit():
             pullups = int(pullups)
-            if pullups >= 15:  # условный норматив "отлично"
-                levels.append("Excellent")
-            elif pullups >= 12:  # условный норматив "хорошо"
-                levels.append("Good")
-            elif pullups >= 8:   # условный норматив "удовл."
-                levels.append("Satisfactory")
-            else:
-                levels.append("Fail")
+            if course == 1:
+                if pullups >= 13:  # Отл – 13 раз
+                    levels.append("Excellent")
+                elif pullups >= 11:  # Хор – 11 раз
+                    levels.append("Good")
+                elif pullups >= 9:   # Уд – 9 раз
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
+            elif course == 2:
+                if pullups >= 15:  # Отл – 15 раз
+                    levels.append("Excellent")
+                elif pullups >= 13:  # Хор – 13 раз
+                    levels.append("Good")
+                elif pullups >= 11:   # Уд – 11 раз
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
+            else:  # 3-й и старшие курсы
+                if pullups >= 16:  # Отл – 16 раз
+                    levels.append("Excellent")
+                elif pullups >= 14:  # Хор – 14 раз
+                    levels.append("Good")
+                elif pullups >= 12:   # Уд – 12 раз
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
         else:
             levels.append("Unknown")
         
-        # Подъем переворотом
+        # Подъем переворотом - точные нормативы
         chinups = strength_data['chinups']
         if chinups.isdigit():
             chinups = int(chinups)
-            if chinups >= 8:  # условный норматив "отлично"
-                levels.append("Excellent")
-            elif chinups >= 5:  # условный норматив "хорошо"
-                levels.append("Good")
-            elif chinups >= 3:   # условный норматив "удовл."
-                levels.append("Satisfactory")
-            else:
-                levels.append("Fail")
+            if course == 1:
+                if chinups >= 7:  # Отл – 7 раз
+                    levels.append("Excellent")
+                elif chinups >= 6:  # Хор – 6 раз
+                    levels.append("Good")
+                elif chinups >= 5:   # Уд – 5 раз
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
+            elif course == 2:
+                if chinups >= 8:  # Отл – 8 раз
+                    levels.append("Excellent")
+                elif chinups >= 7:  # Хор – 7 раз
+                    levels.append("Good")
+                elif chinups >= 6:   # Уд – 6 раз
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
+            else:  # 3-й и старшие курсы
+                if chinups >= 9:  # Отл – 9 раз
+                    levels.append("Excellent")
+                elif chinups >= 8:  # Хор – 8 раз
+                    levels.append("Good")
+                elif chinups >= 7:   # Уд – 7 раз
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
         else:
             levels.append("Unknown")
         
@@ -474,45 +587,105 @@ class FitnessApp:
         # Оценка уровня выносливости на основе результатов
         levels = []
         
-        # Бег 5 км - нормативы для 3 курса (пример)
+        # Получаем номер курса
+        course = int(self.course_var.get())
+        
+        # Бег 5 км - точные нормативы
         run5k = self.parse_time(endurance_data['run5k'])
         if run5k is not None:
-            if run5k <= 1200:  # условный норматив "отлично" (20:00)
-                levels.append("Excellent")
-            elif run5k <= 1320:  # условный норматив "хорошо" (22:00)
-                levels.append("Good")
-            elif run5k <= 1500:   # условный норматив "удовл." (25:00)
-                levels.append("Satisfactory")
-            else:
-                levels.append("Fail")
+            if course == 1:
+                if run5k <= 1440:  # Отл – 24:00 мин
+                    levels.append("Excellent")
+                elif run5k <= 1500:  # Хор – 25:00 мин
+                    levels.append("Good")
+                elif run5k <= 1560:   # Уд – 26:00 мин
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
+            elif course == 2:
+                if run5k <= 1380:  # Отл – 23:00 мин
+                    levels.append("Excellent")
+                elif run5k <= 1440:  # Хор – 24:00 мин
+                    levels.append("Good")
+                elif run5k <= 1500:   # Уд – 25:00 мин
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
+            else:  # 3-й и старшие курсы
+                if run5k <= 1320:  # Отл – 22:00 мин
+                    levels.append("Excellent")
+                elif run5k <= 1380:  # Хор – 23:00 мин
+                    levels.append("Good")
+                elif run5k <= 1440:   # Уд – 24:00 мин
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
         else:
             levels.append("Unknown")
         
-        # Бег 3 км
+        # Бег 3 км - точные нормативы
         run3k = self.parse_time(endurance_data['run3k'])
         if run3k is not None:
-            if run3k <= 720:  # условный норматив "отлично" (12:00)
-                levels.append("Excellent")
-            elif run3k <= 780:  # условный норматив "хорошо" (13:00)
-                levels.append("Good")
-            elif run3k <= 900:   # условный норматив "удовл." (15:00)
-                levels.append("Satisfactory")
-            else:
-                levels.append("Fail")
+            if course == 1:
+                if run3k <= 740:  # Отл – 12:20 мин (740 сек)
+                    levels.append("Excellent")
+                elif run3k <= 755:  # Хор – 12:35 мин (755 сек)
+                    levels.append("Good")
+                elif run3k <= 790:   # Уд – 13:10 мин (790 сек)
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
+            elif course == 2:
+                if run3k <= 730:  # Отл – 12:10 мин (730 сек)
+                    levels.append("Excellent")
+                elif run3k <= 740:  # Хор – 12:20 мин (740 сек)
+                    levels.append("Good")
+                elif run3k <= 780:   # Уд – 13:00 мин (780 сек)
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
+            else:  # 3-й и старшие курсы
+                if run3k <= 720:  # Отл – 12:00 мин (720 сек)
+                    levels.append("Excellent")
+                elif run3k <= 740:  # Хор – 12:20 мин (740 сек)
+                    levels.append("Good")
+                elif run3k <= 770:   # Уд – 12:50 мин (770 сек)
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
         else:
             levels.append("Unknown")
         
-        # Марш-бросок 5 км
+        # Марш-бросок 5 км - нормативы (предположим те же, что и для 5км бега)
         march5k = self.parse_time(endurance_data['march5k'])
         if march5k is not None:
-            if march5k <= 2400:  # условный норматив "отлично" (40:00)
-                levels.append("Excellent")
-            elif march5k <= 2700:  # условный норматив "хорошо" (45:00)
-                levels.append("Good")
-            elif march5k <= 3000:   # условный норматив "удовл." (50:00)
-                levels.append("Satisfactory")
-            else:
-                levels.append("Fail")
+            if course == 1:
+                if march5k <= 1440:  # Отл – 24:00 мин
+                    levels.append("Excellent")
+                elif march5k <= 1500:  # Хор – 25:00 мин
+                    levels.append("Good")
+                elif march5k <= 1560:   # Уд – 26:00 мин
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
+            elif course == 2:
+                if march5k <= 1380:  # Отл – 23:00 мин
+                    levels.append("Excellent")
+                elif march5k <= 1440:  # Хор – 24:00 мин
+                    levels.append("Good")
+                elif march5k <= 1500:   # Уд – 25:00 мин
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
+            else:  # 3-й и старшие курсы
+                if march5k <= 1320:  # Отл – 22:00 мин
+                    levels.append("Excellent")
+                elif march5k <= 1380:  # Хор – 23:00 мин
+                    levels.append("Good")
+                elif march5k <= 1440:   # Уд – 24:00 мин
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
         else:
             levels.append("Unknown")
         
@@ -530,48 +703,108 @@ class FitnessApp:
         # Оценка уровня быстроты на основе результатов
         levels = []
         
-        # Бег 100 м
+        # Получаем номер курса
+        course = int(self.course_var.get())
+        
+        # Бег 100 м - точные нормативы
         run100m = speed_data['run100m']
         if run100m.replace('.', '', 1).isdigit():
             run100m = float(run100m)
-            if run100m <= 12.0:  # условный норматив "отлично"
-                levels.append("Excellent")
-            elif run100m <= 14.0:  # условный норматив "хорошо"
-                levels.append("Good")
-            elif run100m <= 16.0:   # условный норматив "удовл."
-                levels.append("Satisfactory")
-            else:
-                levels.append("Fail")
+            if course == 1:
+                if run100m <= 14.2:  # Отл – 14.2 сек
+                    levels.append("Excellent")
+                elif run100m <= 14.6:  # Хор – 14.6 сек
+                    levels.append("Good")
+                elif run100m <= 15.6:   # Уд – 15.6 сек
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
+            elif course == 2:
+                if run100m <= 14.0:  # Отл – 14.0 сек
+                    levels.append("Excellent")
+                elif run100m <= 14.4:  # Хор – 14.4 сек
+                    levels.append("Good")
+                elif run100m <= 15.2:   # Уд – 15.2 сек
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
+            else:  # 3-й и старшие курсы
+                if run100m <= 13.9:  # Отл – 13.9 сек
+                    levels.append("Excellent")
+                elif run100m <= 14.3:  # Хор – 14.3 сек
+                    levels.append("Good")
+                elif run100m <= 15.0:   # Уд – 15.0 сек
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
         else:
             levels.append("Unknown")
         
-        # Челночный бег 10x10 м
+        # Челночный бег 10x10 м - точные нормативы
         shuttle = speed_data['shuttle10x10']
         if shuttle.replace('.', '', 1).isdigit():
             shuttle = float(shuttle)
-            if shuttle <= 12.0:  # условный норматив "отлично"
-                levels.append("Excellent")
-            elif shuttle <= 14.0:  # условный норматив "хорошо"
-                levels.append("Good")
-            elif shuttle <= 16.0:   # условный норматив "удовл."
-                levels.append("Satisfactory")
-            else:
-                levels.append("Fail")
+            if course == 1:
+                if shuttle <= 28.0:  # Отл – 28.0 сек
+                    levels.append("Excellent")
+                elif shuttle <= 28.5:  # Хор – 28.5 сек
+                    levels.append("Good")
+                elif shuttle <= 29.5:   # Уд – 29.5 сек
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
+            elif course == 2:
+                if shuttle <= 27.5:  # Отл – 27.5 сек
+                    levels.append("Excellent")
+                elif shuttle <= 28.0:  # Хор – 28.0 сек
+                    levels.append("Good")
+                elif shuttle <= 29.0:   # Уд – 29.0 сек
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
+            else:  # 3-й и старшие курсы
+                if shuttle <= 27.0:  # Отл – 27.0 сек
+                    levels.append("Excellent")
+                elif shuttle <= 27.5:  # Хор – 27.5 сек
+                    levels.append("Good")
+                elif shuttle <= 28.5:   # Уд – 28.5 сек
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
         else:
             levels.append("Unknown")
         
-        # Бег 60 м
+        # Бег 60 м - точные нормативы
         run60m = speed_data['run60m']
         if run60m.replace('.', '', 1).isdigit():
             run60m = float(run60m)
-            if run60m <= 7.0:  # условный норматив "отлично"
-                levels.append("Excellent")
-            elif run60m <= 8.0:  # условный норматив "хорошо"
-                levels.append("Good")
-            elif run60m <= 9.0:   # условный норматив "удовл."
-                levels.append("Satisfactory")
-            else:
-                levels.append("Fail")
+            if course == 1:
+                if run60m <= 8.7:  # Отл – 8.7 сек
+                    levels.append("Excellent")
+                elif run60m <= 9.4:  # Хор – 9.4 сек
+                    levels.append("Good")
+                elif run60m <= 9.8:   # Уд – 9.8 сек
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
+            elif course == 2:
+                if run60m <= 8.6:  # Отл – 8.6 сек
+                    levels.append("Excellent")
+                elif run60m <= 9.3:  # Хор – 9.3 сек
+                    levels.append("Good")
+                elif run60m <= 9.7:   # Уд – 9.7 сек
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
+            else:  # 3-й и старшие курсы
+                if run60m <= 8.4:  # Отл – 8.4 сек
+                    levels.append("Excellent")
+                elif run60m <= 9.1:  # Хор – 9.1 сек
+                    levels.append("Good")
+                elif run60m <= 9.5:   # Уд – 9.5 сек
+                    levels.append("Satisfactory")
+                else:
+                    levels.append("Fail")
         else:
             levels.append("Unknown")
         
@@ -614,37 +847,48 @@ class FitnessApp:
         # Создание расписания тренировок на основе базы данных тренировок
         schedule = {}
         
+        # Проверяем, все ли качества на уровне "Excellent"
+        all_excellent = all(level == "Excellent" for level in priorities.values())
+        
         # Определяем приоритетные типы тренировок на основе слабых мест
         priority_types = self.get_priority_types(priorities)
         
         # Выбираем тренировки из базы данных
         for i, day in enumerate(days):
-            # Определяем тип тренировки для дня на основе приоритетов
-            if len(days) == 1:
-                # Если только один день - комплексная тренировка
-                training = self.find_training_by_tags(['комплекс', 'тест'])
-            elif len(days) == 2:
-                # Если два дня - чередуем силу и выносливость
-                if i % 2 == 0:
-                    training = self.find_training_by_type(['сила'], priority_types['strength'])
+            # Если все качества "Excellent", включаем поддерживающие тренировки
+            if all_excellent and len(days) > 1:
+                # Каждая третья тренировка может быть поддерживающей
+                if i % 3 == 0:  # Пример: чередуем основные и поддерживающие
+                    training = self.find_training_by_tags(['поддерживающая'])
                 else:
-                    training = self.find_training_by_type(['выносливость'], priority_types['endurance'])
-            elif len(days) == 3:
-                # Если три дня - силы, выносливость, быстрота
-                if i % 3 == 0:
-                    training = self.find_training_by_type(['сила'], priority_types['strength'])
-                elif i % 3 == 1:
-                    training = self.find_training_by_type(['выносливость'], priority_types['endurance'])
-                else:
-                    training = self.find_training_by_type(['быстрота'], priority_types['speed'])
-            elif len(days) >= 4:
-                # Если 4+ дня - распределяем по приоритетам
-                if i % 3 == 0:
-                    training = self.find_training_by_type(['сила'], priority_types['strength'])
-                elif i % 3 == 1:
-                    training = self.find_training_by_type(['выносливость'], priority_types['endurance'])
-                else:
-                    training = self.find_training_by_type(['быстрота'], priority_types['speed'])
+                    training = self.find_training_by_type(['сила', 'выносливость', 'быстрота'], "low")
+            else:
+                # Определяем тип тренировки для дня на основе приоритетов
+                if len(days) == 1:
+                    # Если только один день - комплексная тренировка
+                    training = self.find_training_by_tags(['комплекс', 'тест'])
+                elif len(days) == 2:
+                    # Если два дня - чередуем силу и выносливость
+                    if i % 2 == 0:
+                        training = self.find_training_by_type(['сила'], priority_types['strength'])
+                    else:
+                        training = self.find_training_by_type(['выносливость'], priority_types['endurance'])
+                elif len(days) == 3:
+                    # Если три дня - силы, выносливость, быстрота
+                    if i % 3 == 0:
+                        training = self.find_training_by_type(['сила'], priority_types['strength'])
+                    elif i % 3 == 1:
+                        training = self.find_training_by_type(['выносливость'], priority_types['endurance'])
+                    else:
+                        training = self.find_training_by_type(['быстрота'], priority_types['speed'])
+                elif len(days) >= 4:
+                    # Если 4+ дня - распределяем по приоритетам
+                    if i % 3 == 0:
+                        training = self.find_training_by_type(['сила'], priority_types['strength'])
+                    elif i % 3 == 1:
+                        training = self.find_training_by_type(['выносливость'], priority_types['endurance'])
+                    else:
+                        training = self.find_training_by_type(['быстрота'], priority_types['speed'])
             
             if training:
                 schedule[day] = training
@@ -676,19 +920,21 @@ class FitnessApp:
         
         for training in self.training_database:
             if any(t in training['type'] for t in types):
-                # Учитываем уровень сложности в зависимости от приоритета
-                if priority_level == "high":
-                    # Для высокого приоритета выбираем тренировки подходящего уровня или немного выше
-                    if training['level'] in ["базовый", "средний"]:
-                        matching_trainings.append(training)
-                elif priority_level == "medium":
-                    # Для среднего приоритета выбираем тренировки среднего уровня
-                    if training['level'] in ["средний"]:
-                        matching_trainings.append(training)
-                else:  # low
-                    # Для низкого приоритета выбираем тренировки среднего или продвинутого уровня
-                    if training['level'] in ["средний", "продвинутый"]:
-                        matching_trainings.append(training)
+                # Исключаем поддерживающие тренировки, если не ищем их специально
+                if "поддерживающая" not in training['tags']:
+                    # Учитываем уровень сложности в зависимости от приоритета
+                    if priority_level == "high":
+                        # Для высокого приоритета выбираем тренировки подходящего уровня или немного выше
+                        if training['level'] in ["базовый", "средний"]:
+                            matching_trainings.append(training)
+                    elif priority_level == "medium":
+                        # Для среднего приоритета выбираем тренировки среднего уровня
+                        if training['level'] in ["средний"]:
+                            matching_trainings.append(training)
+                    else:  # low
+                        # Для низкого приоритета выбираем тренировки среднего или продвинутого уровня
+                        if training['level'] in ["средний", "продвинутый"]:
+                            matching_trainings.append(training)
         
         # Если нашли подходящие тренировки, возвращаем случайную
         if matching_trainings:
@@ -697,16 +943,22 @@ class FitnessApp:
         else:
             # Если не нашли подходящие тренировки, возвращаем первую попавшуюся подходящего типа
             for training in self.training_database:
-                if any(t in training['type'] for t in types):
+                if any(t in training['type'] for t in types) and "поддерживающая" not in training['tags']:
                     return training
     
         return None
     
     def find_training_by_tags(self, tags):
         # Находим тренировку по тегам
+        matching_trainings = []
         for training in self.training_database:
             if any(tag in training['tags'] for tag in tags):
-                return training
+                matching_trainings.append(training)
+        
+        # Если нашли подходящие тренировки, возвращаем случайную
+        if matching_trainings:
+            import random
+            return random.choice(matching_trainings)
         return None
     
     def get_default_training(self):
